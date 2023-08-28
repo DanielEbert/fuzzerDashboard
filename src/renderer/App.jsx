@@ -22,6 +22,7 @@ import {
   flexRender,
   FilterFns,
   createColumnHelper,
+  getExpandedRowModel,
 } from '@tanstack/react-table';
 
 import {
@@ -654,6 +655,9 @@ function flattenStats() {
           ...finding,
         });
       }
+
+      // TODO: dedup prev found findings. maybe not here but after all filters applied?
+      // before displaying, i can look entries to remove duplicates
       for (let finding of stats[subsys][runnable][
         'previously_found_findings'
       ]) {
@@ -661,6 +665,7 @@ function flattenStats() {
           subsys,
           runnable,
           is_new: false,
+          mytest: '213',
           ...finding,
         });
       }
@@ -700,9 +705,41 @@ const fuzzySort = (rowA, rowB, columnId) => {
   return dir === 0 ? sortingFns.alphanumeric(rowA, rowB, columnId) : dir;
 };
 
+const renderReproduceGuide = (row) => {
+  console.log(row.original.subsys);
+  return (
+    <div className="px-4 p-1">
+      <pre>
+        {`\
+To reproduce the finding, run './go_docker.sh fuzzing' and:
+fuzz_fix reproduce --input_url https://artifactory02.../${row.original.subsys}/${row.original.runnable}/${row.original.artifactory_folder}
+`}
+      </pre>
+    </div>
+  );
+};
+
 const columnHelper = createColumnHelper();
 
 const columns = [
+  {
+    id: 'expander',
+    header: () => null,
+    cell: ({ row }) => {
+      return row.getCanExpand() ? (
+        <button
+          {...{
+            onClick: row.getToggleExpandedHandler(),
+            style: { cursor: 'pointer' },
+          }}
+        >
+          {row.getIsExpanded() ? '👇' : '👉'}
+        </button>
+      ) : (
+        '🔵'
+      );
+    },
+  },
   columnHelper.accessor('timestamp', {
     header: () => 'Timestamp',
     cell: (info) => info.getValue(),
@@ -750,23 +787,17 @@ const columns = [
 
 function Main() {
   const [dateRange, setDateRange] = useState({
-    startDate: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
+    startDate: new Date(Date.now() - 30 * 7 * 24 * 60 * 60 * 1000),
     endDate: new Date(Date.now()),
   });
 
   const onDateRangeChanged = (newValue) => {
     setDateRange({
       startDate: new Date(newValue.startDate),
-      endDate: new Date(
-        new Date(newValue.endDate) // TODO: add later during search .valueOf() + 24 * 60 * 60 * 1000
-      ),
+      endDate: new Date(newValue.endDate),
     });
   };
 
-  const [columnFilters, setColumnFilters] = React.useState([]);
-  const [globalFilter, setGlobalFilter] = React.useState('');
-
-  // const [data, setData] = React.useState(() => flattenedStats);
   const data = useMemo(() => {
     let rowsInTime = [];
     for (const row of flattenedStats) {
@@ -783,9 +814,13 @@ function Main() {
     return rowsInTime;
   }, [dateRange, flattenedStats]);
 
+  const [columnFilters, setColumnFilters] = React.useState([]);
+  const [globalFilter, setGlobalFilter] = React.useState('');
+
   const table = useReactTable({
     data,
     columns,
+    getRowCanExpand: () => true,
     filterFns: {
       fuzzy: fuzzyFilter,
     },
@@ -800,6 +835,7 @@ function Main() {
     getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFacetedRowModel: getFacetedRowModel(),
+    getExpandedRowModel: getExpandedRowModel(),
     getFacetedUniqueValues: getFacetedUniqueValues(),
     getFacetedMinMaxValues: getFacetedMinMaxValues(),
     debugTable: true,
@@ -809,12 +845,26 @@ function Main() {
 
   return (
     <div className="min-h-screen prose">
-      <div className="shadow-sm shadow-white p-2 mb-2">
-        <div className="text-2xl">Fuzzing OneParking</div>
+      <div className="shadow-sm">
+        <div className="p-2 mb-2 ml-4 flex items-center justify-left w-full space-x-10">
+          <div className="text-2xl">Fuzzing OneParking</div>
+          <a
+            href="#"
+            className="hover:bg-gray-500 hover:bg-opacity-20 px-3 py-2 rounded-md"
+          >
+            Findings
+          </a>
+          <a
+            href="#"
+            className="hover:bg-gray-500 hover:bg-opacity-20 px-3 py-2 rounded-md"
+          >
+            Fuzzer Stats
+          </a>
+        </div>
       </div>
       <div className="space-y-2 p-2">
         <div className="flex flex-wrap flex-row space-x-2">
-          <div className="flex">
+          <div className="w-1/5 border rounded">
             <Datepicker
               value={dateRange}
               onChange={onDateRangeChanged}
@@ -824,7 +874,7 @@ function Main() {
           <DebouncedInput
             value={globalFilter ?? ''}
             onChange={(value) => setGlobalFilter(String(value))}
-            className="p-2 font-lg shadow border border-block"
+            className="w-1/5 p-2 font-lg border"
             placeholder="Search all columns..."
           />
         </div>
@@ -840,7 +890,7 @@ function Main() {
                       <th
                         key={header.id}
                         colSpan={header.colSpan}
-                        className="px-6 py-3 text-left tracking-wider"
+                        className="px-6 py-3 text-left tracking-wider bg-blue-400 bg-opacity-30"
                       >
                         {header.isPlaceholder ? null : (
                           <>
@@ -877,22 +927,35 @@ function Main() {
             </thead>
             <tbody>
               {table.getRowModel().rows.map((row) => {
+                console.log(row);
                 return (
-                  <tr key={row.id}>
-                    {row.getVisibleCells().map((cell) => {
-                      return (
-                        <td
-                          key={cell.id}
-                          className="px-6 py-1 whitespace-nowrap "
-                        >
-                          {flexRender(
-                            cell.column.columnDef.cell,
-                            cell.getContext()
-                          )}
+                  <>
+                    <tr
+                      key={row.id}
+                      className="hover:bg-gray-500 hover:bg-opacity-20"
+                    >
+                      {row.getVisibleCells().map((cell) => {
+                        return (
+                          <td
+                            key={cell.id}
+                            className="px-6 py-1 whitespace-nowrap "
+                          >
+                            {flexRender(
+                              cell.column.columnDef.cell,
+                              cell.getContext()
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                    {row.getIsExpanded() && (
+                      <tr>
+                        <td colSpan={row.getVisibleCells().length}>
+                          {renderReproduceGuide(row)}
                         </td>
-                      );
-                    })}
-                  </tr>
+                      </tr>
+                    )}
+                  </>
                 );
               })}
             </tbody>
