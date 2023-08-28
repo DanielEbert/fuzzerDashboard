@@ -101,6 +101,16 @@ const stats = JSON.parse(`
           "branch": "HEAD",
           "commit": "e9a46411",
           "commit_timestamp": "'2023-08-18 12:25:49'",
+          "bug_type": "Null Pointer",
+          "error_message": "Duplicate - Unknown",
+          "artifactory_folder": "2023_08_05_22_05_54/findings/crashes/0"
+        },
+        {
+          "epoch_timestamp": 1692475569,
+          "timestamp": "19.08.2023 22:06:09",
+          "branch": "HEAD",
+          "commit": "e9a46411",
+          "commit_timestamp": "'2023-08-18 12:25:49'",
           "bug_type": "Buffer Overflow",
           "error_message": "stack-buffer-overflow on address 0x7f18377d029c at pc 0x00000053f012 bp 0x7ffe1bb299b0 sp 0x7ffe1bb299a0",
           "artifactory_folder": "2023_07_24_14_23_46/findings/crashes/1"
@@ -706,7 +716,6 @@ const fuzzySort = (rowA, rowB, columnId) => {
 };
 
 const renderReproduceGuide = (row) => {
-  console.log(row.original.subsys);
   return (
     <div className="px-4 p-1">
       <pre>
@@ -717,6 +726,44 @@ fuzz_fix reproduce --input_url https://artifactory02.../${row.original.subsys}/$
       </pre>
     </div>
   );
+};
+
+const deduplicateRows = (rows) => {
+  const deduplicatedRows = [];
+  const seenArtiFolders = new Set();
+
+  // Prioritize new findings
+  rows.forEach((row) => {
+    if (!row.original.is_new) {
+      return;
+    }
+    const fullArtiPath = [
+      row.original.subsys,
+      row.original.runnable,
+      row.original.artifactory_folder,
+    ].join('/');
+    if (!seenArtiFolders.has(fullArtiPath)) {
+      seenArtiFolders.add(fullArtiPath);
+      deduplicatedRows.push(row);
+    }
+  });
+
+  rows.forEach((row) => {
+    if (row.original.is_new) {
+      return;
+    }
+    const fullArtiPath = [
+      row.original.subsys,
+      row.original.runnable,
+      row.original.artifactory_folder,
+    ].join('/');
+    if (!seenArtiFolders.has(fullArtiPath)) {
+      seenArtiFolders.add(fullArtiPath);
+      deduplicatedRows.push(row);
+    }
+  });
+
+  return deduplicatedRows;
 };
 
 const columnHelper = createColumnHelper();
@@ -843,6 +890,8 @@ function Main() {
     debugColumns: false,
   });
 
+  console.log(table.getRowModel().rows);
+
   return (
     <div className="min-h-screen prose">
       <div className="shadow-sm">
@@ -926,8 +975,7 @@ function Main() {
               ))}
             </thead>
             <tbody>
-              {table.getRowModel().rows.map((row) => {
-                console.log(row);
+              {deduplicateRows(table.getRowModel().rows).map((row) => {
                 return (
                   <>
                     <tr
